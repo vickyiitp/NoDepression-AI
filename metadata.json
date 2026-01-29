@@ -1,0 +1,7 @@
+{
+  "name": "NoDepression AI",
+  "description": "An AI-powered mental health & wellness platform for students focusing on early detection, prevention, and emotional intelligence. Created by VickyIITP.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
