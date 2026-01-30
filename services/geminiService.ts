@@ -1,18 +1,47 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { RiskAssessment, RiskLevel, WellnessAction, MoodEntry, UserProfile, UIState, GiftDecision, GiftContent } from "../types";
 
+// Helper to reliably get API Key across different build tools (Vite, CRA, Next, etc.)
+const getApiKey = (): string => {
+  let key = '';
+
+  // 1. Try Vite (import.meta.env) - Most likely for this project structure
+  try {
+    // @ts-ignore
+    if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_KEY) {
+      // @ts-ignore
+      key = import.meta.env.VITE_API_KEY;
+    }
+  } catch (e) {}
+
+  if (key) return key;
+
+  // 2. Try Process Env (CRA / Webpack / Next.js)
+  try {
+    if (typeof process !== 'undefined' && process.env) {
+      // Prioritize public prefixes usually exposed by bundlers
+      if (process.env.REACT_APP_API_KEY) key = process.env.REACT_APP_API_KEY;
+      else if (process.env.NEXT_PUBLIC_API_KEY) key = process.env.NEXT_PUBLIC_API_KEY;
+      else if (process.env.VITE_API_KEY) key = process.env.VITE_API_KEY;
+      else if (process.env.API_KEY) key = process.env.API_KEY;
+    }
+  } catch (e) {}
+
+  return key || '';
+};
+
 // Initialize AI Client Safely
 let ai: GoogleGenAI | null = null;
 
 try {
-  // Check for API key availability to prevent white-screen crashes on local/deployments without env vars
-  // Safely access process.env even if polyfilled in browser
-  const apiKey = typeof process !== 'undefined' && process.env ? process.env.API_KEY : '';
+  const apiKey = getApiKey();
   
-  if (apiKey) {
+  // Check if key exists and is not the placeholder empty string from index.html
+  if (apiKey && apiKey.trim().length > 0 && apiKey !== 'undefined') {
     ai = new GoogleGenAI({ apiKey });
+    console.log("NoDepression AI: Client initialized successfully.");
   } else {
-    console.warn("NoDepression AI: API Key is missing. App running in fallback mode.");
+    console.warn("NoDepression AI: API Key is missing. Please add VITE_API_KEY to your environment variables.");
   }
 } catch (error) {
   console.error("AI Client Initialization Failed:", error);
@@ -113,6 +142,20 @@ CONTENT TYPES YOU CAN GENERATE:
 `;
 
 const FULL_SYSTEM_PROMPT = SYSTEM_PROMPT + "\n\n" + SECURITY_PROMPT;
+
+// Fallback Content for robust offline experience
+const FALLBACK_QUOTES = [
+    { text: "You don't have to figure it all out today.", author: "NoDepression AI" },
+    { text: "Breathe. You are doing better than you think.", author: "NoDepression AI" },
+    { text: "It's okay to take a break. You are allowed to rest.", author: "NoDepression AI" },
+    { text: "Your worth is not measured by your productivity.", author: "NoDepression AI" }
+];
+
+const FALLBACK_FACTS = [
+    { text: "Did you know? Deep breathing activates your vagus nerve, physically forcing your body to relax." },
+    { text: "Psychology Fact: Naming your emotions ('I feel anxious') reduces their intensity in the brain." },
+    { text: "Science says: Looking at fractals (like clouds or leaves) can reduce stress by up to 60%." }
+];
 
 /**
  * 🛡️ 0. INPUT SANITIZATION & ATTACK DETECTION
@@ -280,7 +323,7 @@ export const sendChatMessage = async (
   history: { role: string; parts: { text: string }[] }[],
   userContext: UserProfile
 ) => {
-  if (!ai) return "I am currently in offline mode because the AI service is not configured. I'm still here to listen, but I can't generate new responses right now.";
+  if (!ai) return "I am currently in offline mode because the AI service is not configured. Please add VITE_API_KEY to your environment variables.";
 
   try {
     // 🛡️ SECURITY CHECK FIRST
@@ -445,7 +488,14 @@ export const generateWellnessActions = async (currentEmotion: string, intensity:
  */
 
 export const checkGiftVisibility = async (emotion: string, intensity: number, riskLevel: string): Promise<GiftDecision> => {
-    if (!ai) return { showGift: false, urgency: 'low' };
+    // 1. Determine via Local Heuristic (Fast & Reliable Fallback)
+    const negativeEmotions = ['Sad', 'Anxious', 'Stressed', 'Lonely', 'Burnout', 'Tired', 'Angry', 'Fear', 'Panic'];
+    const isNegative = negativeEmotions.some(e => emotion.includes(e));
+    const shouldShowLocal = isNegative || intensity > 3 || riskLevel !== RiskLevel.LOW;
+    
+    if (!ai) {
+        return { showGift: shouldShowLocal, urgency: shouldShowLocal ? 'medium' : 'low' };
+    }
 
     try {
         const prompt = `Based on the following analysis, decide whether to show the Gift feature.
@@ -478,13 +528,28 @@ export const checkGiftVisibility = async (emotion: string, intensity: number, ri
 
         return JSON.parse(cleanJSON(response.text));
     } catch (e) {
-        console.error("Gift Check Error", e);
-        return { showGift: false, urgency: 'low' };
+        console.warn("Gift Check API failed, using local heuristic");
+        // Use the local heuristic if API fails, so feature is not broken
+        return { showGift: shouldShowLocal, urgency: 'medium' };
     }
 }
 
 export const generateGiftContent = async (emotion: string, riskLevel: string): Promise<GiftContent> => {
-    if (!ai) return { type: 'quote', text: 'You are stronger than you know.', author: 'NoDepression AI' };
+    // Fallback Logic
+    const getRandomFallback = (): GiftContent => {
+        const r = Math.random();
+        if (r > 0.6) {
+             const f = FALLBACK_FACTS[Math.floor(Math.random() * FALLBACK_FACTS.length)];
+             return { type: 'fact', text: f.text };
+        } else if (r > 0.3) {
+             const q = FALLBACK_QUOTES[Math.floor(Math.random() * FALLBACK_QUOTES.length)];
+             return { type: 'quote', text: q.text, author: q.author };
+        } else {
+             return { type: 'game', text: 'Pop the stress away.', gameType: 'bubble-pop' };
+        }
+    };
+
+    if (!ai) return getRandomFallback();
 
     try {
         const prompt = `Generate a personalized emotional support "gift" for a student.
@@ -525,7 +590,7 @@ export const generateGiftContent = async (emotion: string, riskLevel: string): P
 
         return JSON.parse(cleanJSON(response.text));
     } catch (e) {
-        console.error("Gift Gen Error", e);
-        return { type: 'quote', text: 'You are enough.', author: 'Unknown' };
+        console.warn("Gift Gen API failed, using fallback");
+        return getRandomFallback();
     }
 }
