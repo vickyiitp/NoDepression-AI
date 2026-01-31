@@ -41,7 +41,11 @@ try {
     ai = new GoogleGenAI({ apiKey });
     console.log("NoDepression AI: Client initialized successfully.");
   } else {
-    console.warn("NoDepression AI: API Key is missing. Please add VITE_API_KEY to your environment variables.");
+    console.warn("NoDepression AI: API Key is missing.");
+    // Vercel Debugging Help
+    if (typeof process !== 'undefined' && process.env && process.env.API_KEY) {
+        console.error("⚠️ DETECTED 'API_KEY' IN ENV BUT NOT 'VITE_API_KEY'. ON VERCEL/NETLIFY, YOU MUST NAME YOUR VARIABLE 'VITE_API_KEY' FOR IT TO BE VISIBLE IN THE BROWSER.");
+    }
   }
 } catch (error) {
   console.error("AI Client Initialization Failed:", error);
@@ -50,6 +54,28 @@ try {
 // Model Configuration (Internal)
 const FAST_MODEL = 'gemini-3-flash-preview'; // Speed optimized
 const DEEP_MODEL = 'gemini-3-pro-preview';   // Intelligence optimized
+
+// Timeout Helper to prevent infinite loading states
+const withTimeout = <T>(promise: Promise<T>, ms: number = 8000, fallbackValue: T): Promise<T> => {
+    let timeoutId: any;
+    const timeoutPromise = new Promise<T>((resolve) => {
+        timeoutId = setTimeout(() => {
+            console.warn(`API Request timed out after ${ms}ms. Using fallback.`);
+            resolve(fallbackValue);
+        }, ms);
+    });
+
+    return Promise.race([
+        promise.then((res) => {
+            clearTimeout(timeoutId);
+            return res;
+        }).catch((err) => {
+             console.warn("API Request Failed:", err);
+             return fallbackValue;
+        }),
+        timeoutPromise
+    ]);
+};
 
 // Helper to clean JSON strings from Markdown code blocks
 const cleanJSON = (text: string | undefined): string => {
@@ -239,7 +265,8 @@ export const analyzeEmotionAndUI = async (text: string, manualMood: string) => {
 
   if (!ai) return fallback;
 
-  try {
+  // We wrap the AI call in a timeout safe function
+  const executeAnalysis = async () => {
     // 🛡️ SECURITY CHECK FIRST
     if (text) {
         const safety = await validateInputSafety(text);
@@ -303,15 +330,11 @@ export const analyzeEmotionAndUI = async (text: string, manualMood: string) => {
     });
 
     const data = JSON.parse(cleanJSON(response.text));
-    
-    if (!data.uiState) {
-        data.uiState = fallback.uiState;
-    }
+    if (!data.uiState) data.uiState = fallback.uiState;
     return data;
-  } catch (error) {
-    console.warn("Emotion/UI analysis failed", error);
-    return fallback;
-  }
+  };
+
+  return withTimeout(executeAnalysis(), 5000, fallback);
 };
 
 /**
@@ -325,7 +348,7 @@ export const sendChatMessage = async (
 ) => {
   if (!ai) return "I am currently in offline mode because the AI service is not configured. Please add VITE_API_KEY to your environment variables.";
 
-  try {
+  const executeChat = async () => {
     // 🛡️ SECURITY CHECK FIRST
     const safety = await validateInputSafety(message);
     if (!safety.isSafe) {
@@ -335,7 +358,6 @@ export const sendChatMessage = async (
     const chat = ai.chats.create({
       model: DEEP_MODEL,
       config: {
-        // Injecting the Security Guardian prompt alongside the Persona prompt
         systemInstruction: FULL_SYSTEM_PROMPT + `\nUser Context: Name: ${userContext.name}, Stressors: ${userContext.stressors.join(', ')}`,
         temperature: 0.7,
       },
@@ -344,27 +366,25 @@ export const sendChatMessage = async (
 
     const result = await chat.sendMessage({ message });
     return result.text;
-  } catch (error) {
-    console.error("Chat Error:", error);
-    return "I'm listening. Sometimes connection drops, but I am here.";
-  }
+  };
+
+  return withTimeout(executeChat(), 10000, "I'm listening, but my connection is a bit slow. I'm still here with you.");
 };
 
 /**
  * 🔹 2. Mental Health Risk Evaluation Prompt (🔥 MAIN FEATURE)
  */
 export const analyzeRisk = async (moodHistory: MoodEntry[]): Promise<RiskAssessment> => {
-  if (!ai || moodHistory.length === 0) {
-    return {
+  const fallback: RiskAssessment = {
       level: RiskLevel.LOW,
       factors: ["Data processing unavailable"],
       recommendedAction: "Keep checking in.",
       lastUpdated: new Date().toISOString()
-    };
-  }
+  };
 
-  try {
-    // Minimal data exposure: Only sending necessary fields
+  if (!ai || moodHistory.length === 0) return fallback;
+
+  const executeRisk = async () => {
     const recentLogs = moodHistory.slice(-10).map(e => ({
       date: e.timestamp,
       emotion: e.mood,
@@ -373,16 +393,8 @@ export const analyzeRisk = async (moodHistory: MoodEntry[]): Promise<RiskAssessm
     }));
 
     const prompt = `You are evaluating mental wellness risk for a student.
-
-    Input Data:
-    - Recent emotional states: ${JSON.stringify(recentLogs)}
-    
-    Determine:
-    1. Risk level: Low / Medium / High
-    2. Main contributing factors (array of strings)
-    3. Suggested next step (gentle, non-medical)
-
-    Respond in JSON only.`;
+    Input Data: ${JSON.stringify(recentLogs)}
+    Determine risk level, factors, and next step. Respond in JSON.`;
 
     const response = await ai.models.generateContent({
       model: DEEP_MODEL,
@@ -402,23 +414,15 @@ export const analyzeRisk = async (moodHistory: MoodEntry[]): Promise<RiskAssessm
     });
     
     const data = JSON.parse(cleanJSON(response.text));
-    
     return {
       level: data.riskLevel,
       factors: data.factors,
       recommendedAction: data.recommendedAction,
       lastUpdated: new Date().toISOString()
     };
+  };
 
-  } catch (error) {
-    console.error("Risk Analysis Error:", error);
-    return {
-      level: RiskLevel.LOW,
-      factors: ["Analysis pending"],
-      recommendedAction: "Keep checking in.",
-      lastUpdated: new Date().toISOString()
-    };
-  }
+  return withTimeout(executeRisk(), 8000, fallback);
 };
 
 /**
@@ -433,27 +437,10 @@ export const generateWellnessActions = async (currentEmotion: string, intensity:
 
   if (!ai) return defaults;
 
-  try {
+  const executeWellness = async () => {
     const prompt = `Generate 3 personalized wellness activities for a student.
-
-    Context:
-    - Current emotion: ${currentEmotion}
-    - Intensity: ${intensity}/10
-    - User Language Style: ${language} (OUTPUT IN THIS LANGUAGE)
-    
-    Rules:
-    - Keep activity short (2–5 minutes)
-    - No generic advice
-    - Use calm and motivating language
-    - If language is Hinglish, write titles and descriptions in Hinglish.
-    
-    Return JSON array of objects with:
-    - title
-    - description
-    - duration
-    - type (Breathing, Journaling, Focus, or Physical)
-    - colorTheme (blue, green, purple, orange)
-    `;
+    Context: Emotion: ${currentEmotion}, Intensity: ${intensity}, Language: ${language}.
+    Return JSON array of objects with title, description, duration, type, colorTheme.`;
 
     const response = await ai.models.generateContent({
       model: FAST_MODEL,
@@ -478,9 +465,9 @@ export const generateWellnessActions = async (currentEmotion: string, intensity:
 
     const actions = JSON.parse(cleanJSON(response.text));
     return actions.map((a: any, index: number) => ({ ...a, id: index.toString() }));
-  } catch (error) {
-    return defaults;
-  }
+  };
+
+  return withTimeout(executeWellness(), 6000, defaults);
 };
 
 /**
@@ -493,22 +480,15 @@ export const checkGiftVisibility = async (emotion: string, intensity: number, ri
     const isNegative = negativeEmotions.some(e => emotion.includes(e));
     const shouldShowLocal = isNegative || intensity > 3 || riskLevel !== RiskLevel.LOW;
     
-    if (!ai) {
-        return { showGift: shouldShowLocal, urgency: shouldShowLocal ? 'medium' : 'low' };
-    }
+    // Default fallback
+    const fallbackDecision: GiftDecision = { showGift: shouldShowLocal, urgency: shouldShowLocal ? 'medium' : 'low' };
 
-    try {
+    if (!ai) return fallbackDecision;
+
+    const executeCheck = async () => {
         const prompt = `Based on the following analysis, decide whether to show the Gift feature.
-        
-        Input:
-        - Emotion: ${emotion}
-        - Intensity: ${intensity}
-        - Risk level: ${riskLevel}
-        
-        Return JSON:
-        - showGift (true/false)
-        - urgency ("low" | "medium" | "high")
-        `;
+        Input: Emotion: ${emotion}, Intensity: ${intensity}, Risk level: ${riskLevel}
+        Return JSON: showGift (true/false), urgency (low/medium/high)`;
 
         const response = await ai.models.generateContent({
             model: FAST_MODEL,
@@ -525,13 +505,10 @@ export const checkGiftVisibility = async (emotion: string, intensity: number, ri
                 }
             }
         });
-
         return JSON.parse(cleanJSON(response.text));
-    } catch (e) {
-        console.warn("Gift Check API failed, using local heuristic");
-        // Use the local heuristic if API fails, so feature is not broken
-        return { showGift: shouldShowLocal, urgency: 'medium' };
-    }
+    };
+
+    return withTimeout(executeCheck(), 3000, fallbackDecision);
 }
 
 export const generateGiftContent = async (emotion: string, riskLevel: string): Promise<GiftContent> => {
@@ -549,26 +526,14 @@ export const generateGiftContent = async (emotion: string, riskLevel: string): P
         }
     };
 
-    if (!ai) return getRandomFallback();
+    const fallback = getRandomFallback();
 
-    try {
+    if (!ai) return fallback;
+
+    const executeGift = async () => {
         const prompt = `Generate a personalized emotional support "gift" for a student.
-        
-        Context:
-        - Emotion: ${emotion}
-        - Risk level: ${riskLevel}
-        
-        Decide the best type of gift:
-        1. Quote (if they need validation/hope)
-        2. Fact (if they need logic/grounding)
-        3. Micro-game (if they need distraction/calm) -> Game options: 'breathing', 'bubble-pop'
-        
-        Return JSON:
-        - type ('quote' | 'fact' | 'game')
-        - text (The quote, the fact, or the game instructions)
-        - gameType (only if type is game: 'breathing' or 'bubble-pop')
-        - author (optional, for quotes)
-        `;
+        Context: Emotion: ${emotion}, Risk level: ${riskLevel}
+        Return JSON: type, text, gameType, author`;
 
         const response = await ai.models.generateContent({
             model: FAST_MODEL,
@@ -589,8 +554,7 @@ export const generateGiftContent = async (emotion: string, riskLevel: string): P
         });
 
         return JSON.parse(cleanJSON(response.text));
-    } catch (e) {
-        console.warn("Gift Gen API failed, using fallback");
-        return getRandomFallback();
-    }
+    };
+
+    return withTimeout(executeGift(), 6000, fallback);
 }

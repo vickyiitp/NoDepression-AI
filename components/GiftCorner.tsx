@@ -34,27 +34,6 @@ const GiftCorner: React.FC<GiftCornerProps> = ({ currentEmotion, intensity, risk
     checkVisibility();
   }, [currentEmotion, intensity, riskLevel]);
 
-  const handleOpen = async () => {
-    setIsOpen(true);
-    setIsLoading(true);
-    setContent(null);
-    
-    // Generate content
-    const gift = await generateGiftContent(currentEmotion, riskLevel);
-    setContent(gift);
-    setIsLoading(false);
-
-    if (gift.type === 'game' && gift.gameType === 'bubble-pop') {
-        initBubbles();
-    }
-  };
-
-  const handleClose = () => {
-    setIsOpen(false);
-    setIsVisible(false); // Hide after use for a while
-    setContent(null);
-  };
-
   const initBubbles = () => {
       const newBubbles = Array.from({ length: 15 }).map((_, i) => ({
           id: i,
@@ -63,6 +42,35 @@ const GiftCorner: React.FC<GiftCornerProps> = ({ currentEmotion, intensity, risk
           size: Math.random() * 40 + 40
       }));
       setBubbles(newBubbles);
+  };
+
+  const handleOpen = async () => {
+    setIsOpen(true);
+    setIsLoading(true);
+    setContent(null);
+    setBubbles([]); // Reset bubbles
+    
+    // Generate content with safe fallback from service
+    const gift = await generateGiftContent(currentEmotion, riskLevel);
+    
+    // Artificial delay if it was too fast (e.g. offline fallback) to show "wrapping" animation
+    if (!gift) {
+        // Double safety for null
+        setContent({ type: 'quote', text: 'You are enough.', author: 'NoDepression AI' });
+    } else {
+        setContent(gift);
+        if (gift.type === 'game' && gift.gameType === 'bubble-pop') {
+            // Wait for render cycle then init
+            setTimeout(initBubbles, 100);
+        }
+    }
+    setIsLoading(false);
+  };
+
+  const handleClose = () => {
+    setIsOpen(false);
+    setIsVisible(false); // Hide after use for a while
+    setContent(null);
   };
 
   const popBubble = (id: number) => {
@@ -193,6 +201,14 @@ const GiftCorner: React.FC<GiftCornerProps> = ({ currentEmotion, intensity, risk
                         >
                             {content.type === 'game' ? 'Done' : 'Thank you'}
                         </button>
+                    </div>
+                )}
+                
+                {/* Fail Safe State - prevents blank modal */}
+                {!isLoading && !content && (
+                    <div className="text-center py-8">
+                        <p className="text-gray-400 mb-4">The gift couldn't be unwrapped right now.</p>
+                        <button onClick={handleClose} className="text-brand-400 underline">Close</button>
                     </div>
                 )}
            </div>
