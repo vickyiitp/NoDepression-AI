@@ -1,20 +1,28 @@
 <div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+
+# 🌱 NoDepression AI — Empathetic Mental Health & Student Support
+### Cognitive Behavioral Reframing, Mindfulness Audio Loops & Compassionate AI Companion
+
+[![Vite](https://img.shields.io/badge/Vite-Fast%20Bundler-646CFF?style=for-the-badge&logo=vite)](https://vitejs.dev/)
+[![React](https://img.shields.io/badge/React-18-61DAFB?style=for-the-badge&logo=react)](https://react.dev/)
+[![HealthTech](https://img.shields.io/badge/Domain-Mental%20Health-10b981?style=for-the-badge)](https://devillabs.dev)
+[![Architect](https://img.shields.io/badge/Architect-Vicky%20Kumar-8b5cf6?style=for-the-badge&logo=github)](https://github.com/vickyiitp)
+
 </div>
 
-# Run and deploy your AI Studio app
+---
 
-This contains everything you need to run your app locally.
+## 🕊️ Features
 
-View your app in AI Studio: https://ai.studio/apps/drive/1OY5WCVCQrXdA8Mq4mhVMG04RbnMOSxBl
+- 💬 **Empathetic Emotional Support**: Conversational agent trained in active listening and Cognitive Behavioral Therapy (CBT) principles.
+- 🧘 **Guided Grounding & Breathwork**: Visual 4-7-8 breathing circle animations for panic and exam anxiety reduction.
+- 🔒 **100% Client-Side Privacy**: Chats are never logged or sold to third-party ad networks.
 
-## Run Locally
+```bash
+git clone https://github.com/vickyiitp/NoDepression-AI.git
+cd NoDepression-AI
+npm install
+npm run dev
+```
 
-**Prerequisites:**  Node.js
-
-
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+Built with ❤️ by **Vicky Kumar** (IIT Patna)
